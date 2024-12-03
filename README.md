@@ -52,7 +52,7 @@ A short summary of each script. There is a giant comment at the top of each scri
 
 - **Why shell scripts?**
 
-  I didn't expect it to grow so much, if I were to do it again I would probably rewrite it in Go.
+  I didn't expect it to grow so much, if I were to do it again I would probably rewrite it in Go. I'm scared of bash scripts.
 
 - **Why not Dart?**
 

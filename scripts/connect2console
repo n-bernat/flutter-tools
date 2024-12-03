@@ -1,0 +1,270 @@
+#!/bin/zsh
+
+# A script that copies release metadata (i.e. changelog) for the latest version from App Store Connect
+# to Google Play Console, and optionally submits it (if you pass `--submit`).
+#
+# Useful when you use third-party apps to manage App Store Connect (e.g. Helm) and want to keep your app
+# in sync between App Store Connect and Google Play Console.
+#
+# MIT License | http://github.com/n-bernat/flutter-tools
+
+# ###################
+# #    Constants    #
+# ###################
+
+# Apple-related credentials
+# APPLE_KEY_ID="XXXXXXXXXXXX"
+# APPLE_KEY_P8="~ base64 encoded api key ~"
+
+# Google-related credentials
+# GOOGLE_SERVICE_ACCOUNT="~ base64 encoded service account ~"
+
+# ###################
+# #     Prepare     #
+# ###################
+
+echo "[ℹ️ ] Validating your configuration, it can take a few seconds..."
+
+# Define the mappings between App Store (key) and Google Play (value) languages.
+# Apple: https://developer.apple.com/documentation/appstoreconnectapi/managing-metadata-in-your-app-by-using-locale-shortcodes
+# Google: https://support.google.com/googleplay/android-developer/answer/9844778
+GET_LANGUAGE() {
+  case $1 in
+  "ar-SA") echo "ar" ;;
+  "ca") echo "ca" ;;
+  "zh-Hans") echo "zh-CN" ;;
+  "zh-Hant") echo "zh-TW" ;;
+  "hr") echo "hr" ;;
+  "cs") echo "cs-CZ" ;;
+  "da") echo "da-DK" ;;
+  "nl-NL") echo "nl-NL" ;;
+  "en-AU") echo "en-AU" ;;
+  "en-CA") echo "en-CA" ;;
+  "en-GB") echo "en-GB" ;;
+  "en-US") echo "en-US" ;;
+  "fi") echo "fi-FI" ;;
+  "fr-FR") echo "fr-FR" ;;
+  "fr-CA") echo "fr-CA" ;;
+  "de-DE") echo "de-DE" ;;
+  "el") echo "el-GR" ;;
+  "he") echo "iw-IL" ;;
+  "hi") echo "hi-IN" ;;
+  "hu") echo "hu-HU" ;;
+  "id") echo "id" ;;
+  "it") echo "it-IT" ;;
+  "ja") echo "ja-JP" ;;
+  "ko") echo "ko-KR" ;;
+  "ms") echo "ms" ;;
+  "no") echo "no-NO" ;;
+  "pl") echo "pl-PL" ;;
+  "pt-BR") echo "pt-BR" ;;
+  "pt-PT") echo "pt-PT" ;;
+  "ro") echo "ro" ;;
+  "ru") echo "ru-RU" ;;
+  "sk") echo "sk" ;;
+  "es-MX") echo "es-419" ;;
+  "es-ES") echo "es-ES" ;;
+  "sv") echo "sv-SE" ;;
+  "th") echo "th" ;;
+  "tr") echo "tr-TR" ;;
+  "uk") echo "uk" ;;
+  "vi") echo "vi" ;;
+  esac
+}
+
+# Check if `pubspec.yaml` file exists
+if [ ! -f "pubspec.yaml" ]; then
+  echo "\033[31m[💥] \`pubspec.yaml\` file not found. Please run this script in the root directory of your Flutter project. \033[0m"
+  exit 1
+fi
+
+# Check if `gcloud` is installed
+if ! command -v gcloud &>/dev/null; then
+  echo "\033[31m[💥] \`gcloud\` is not installed. Please install it by running: \`brew install --cask google-cloud-sdk\` \033[0m"
+  exit 1
+fi
+
+# Check if `jq` is installed
+if ! command -v jq &>/dev/null; then
+  echo "\033[31m[💥] \`jq\` is not installed. Please install it by running: \`brew install jq\` \033[0m"
+  exit 1
+fi
+
+# Get BUILD_NAME and BUILD_NUMBER from `pubspec.yaml` file
+PUBSPEC_VERSION=$(yq -r '.version' pubspec.yaml)
+if [ "$PUBSPEC_VERSION" = "null" ]; then
+  echo "\033[31m[💥] \`version\` field not found in \`pubspec.yaml\` file. Please add a correct version field (e.g. \`version: 1.0.0+1\`) to your \`pubspec.yaml\` file. \033[0m"
+  exit 1
+fi
+
+# Split PUBSPEC_VERSION at `+` sign to `BUILD_NAME` and `BUILD_NUMBER`
+IFS='+' read -r BUILD_NAME BUILD_NUMBER <<<"$PUBSPEC_VERSION"
+
+# Check if BUILD_NUMBER is a number
+if ! [[ $BUILD_NUMBER =~ ^[0-9]+$ ]]; then
+  echo "\033[31m[💥] Build name is not a number (value: \"$BUILD_NUMBER\"). Please make sure your \`version\` field in \`pubspec.yaml\` is correct (e.g. \`version: 1.0.0+1\`), and try again. \033[0m"
+  exit 1
+fi
+
+# Check if BUILD_NAME matches the version regex
+if ! [[ $BUILD_NAME =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+  echo "\033[31m[💥] Build name is not a valid version (value: \"$BUILD_NAME\"). Please make sure your \`version\` field in \`pubspec.yaml\` is correct (e.g. \`version: 1.0.0+1\`), and try again. \033[0m"
+  exit 1
+fi
+
+# Extract Bundle ID from the iOS project
+APPLE_BUNDLE_ID=$(plutil -convert json -o - ios/Runner.xcodeproj/project.pbxproj | jq -r '.. | select(.buildSettings? != null) | select(.buildSettings.IPHONEOS_DEPLOYMENT_TARGET != null and .buildSettings.INFOPLIST_FILE != null) | .buildSettings.PRODUCT_BUNDLE_IDENTIFIER? | select(. != null) | select(length > 0)' | head -n 1)
+if [ $? -ne 0 ]; then
+  echo "\033[31m[💥] Unable to extract the bundle ID from the iOS project. \033[0m"
+  exit 1
+fi
+
+if [ -z "$APPLE_BUNDLE_ID" ]; then
+  echo "\033[31m[💥] Bundle ID not found in the iOS project. \033[0m"
+  exit 1
+fi
+
+# Extract Bundle ID from the Android project
+ANDROID_BUNDLE_ID=$(grep "applicationId" android/app/build.gradle | sed 's/.*applicationId "\(.*\)".*/\1/')
+if [ $? -ne 0 ]; then
+  echo "\033[31m[💥] Unable to extract the bundle ID from the Android project. \033[0m"
+  exit 1
+fi
+
+if [ -z "$ANDROID_BUNDLE_ID" ]; then
+  echo "\033[31m[💥] Bundle ID not found in the Android project. \033[0m"
+  exit 1
+fi
+
+# Clean up and create a temporary directory with private key
+rm -rf .connect2console 2>/dev/null
+mkdir .connect2console
+echo $APPLE_KEY_P8 | base64 --decode >".connect2console/key.p8"
+
+# Generate App Store Connect JWT token
+function CONVERT_EC {
+  INPUT=$(openssl asn1parse -inform der)
+  R=$(echo "$INPUT" | head -2 | tail -1 | cut -d':' -f4)
+  S=$(echo "$INPUT" | head -3 | tail -1 | cut -d':' -f4)
+
+  echo -n $R | xxd -r -p
+  echo -n $S | xxd -r -p
+}
+
+NOW=$(date +%s)
+JWT_HEADER=$(echo -n '{"alg":"ES256","kid":"'$APPLE_KEY_ID'","typ":"JWT"}' | base64 | tr '+/' '-_' | tr -d '=')
+JWT_PAYLOAD=$(echo -n '{"iss":"'$APPLE_ISSUER_ID'","aud":"appstoreconnect-v1","iat":'$NOW',"exp":'$((NOW + 600))'}' | base64 | tr '+/' '-_' | tr -d '=')
+JWT_SIGNATURE=$(echo -n "$JWT_HEADER.$JWT_PAYLOAD" | openssl dgst -binary -sha256 -sign "./.connect2console/key.p8" | CONVERT_EC | openssl base64 -e -A | tr '+/' '-_' | tr -d '\n=')
+JWT="$JWT_HEADER.$JWT_PAYLOAD.$JWT_SIGNATURE"
+
+# Remove temporary key file after generating a JWT token
+rm .connect2console/key.p8
+
+# ###################
+# #      Fetch      #
+# ###################
+
+echo "[ℹ️ ] Fetching the latest release metadata from App Store Connect..."
+
+# Get App ID from Bundle ID
+APPLE_APP_ID=$(curl -s -H "Authorization: Bearer $JWT" \
+  "https://api.appstoreconnect.apple.com/v1/apps" | jq -r '.data[] | select(.attributes.bundleId == "'$APPLE_BUNDLE_ID'") | .id')
+
+# Get the latest Version ID from App ID
+APPLE_VERSION_ID=$(curl -s -H "Authorization: Bearer $JWT" \
+  "https://api.appstoreconnect.apple.com/v1/apps/$APPLE_APP_ID/appStoreVersions?limit=1" | jq -r '.data[] | select(.attributes.versionString == "'$BUILD_NAME'") | .id')
+
+# Get the changelog for the latest version
+CHANGELOG=$(curl -s -H "Authorization: Bearer $JWT" \
+  "https://api.appstoreconnect.apple.com/v1/appStoreVersions/${APPLE_VERSION_ID}/appStoreVersionLocalizations")
+
+# Check if the changelog is available
+if [ $? -ne 0 ] || [ -z "$APPLE_VERSION_ID" ] || [ -z "$CHANGELOG" ]; then
+  echo "\033[31m[💥] Changelog not available for the current version ($BUILD_NAME+$BUILD_NUMBER). \033[0m"
+  exit 1
+fi
+
+# Do some magic and convert the changelog to Google Play Console-compatible format
+OUTPUT=$(printf "%s" "$CHANGELOG" | jq -c '[.data[] | {language: .attributes.locale, text: .attributes.whatsNew}]')
+LANGUAGES=$(printf "%s" $OUTPUT | jq -r '.[].language')
+while read LANGUAGE; do
+  NEW_LANG=$(GET_LANGUAGE $LANGUAGE)
+  if [ -z "$NEW_LANG" ]; then
+    OUTPUT=$(printf "%s" $OUTPUT | jq "del(.[\"$LANGUAGE\"])")
+  else
+    OUTPUT=$(printf "%s" $OUTPUT | sed "s/\"language\":\"$LANGUAGE\",\"/\"language\":\"$NEW_LANG\",\"/g")
+  fi
+done <<<"$LANGUAGES"
+
+# ###################
+# #     Upload      #
+# ###################
+
+echo "[ℹ️ ] Uploading the release metadata to Google Play Console..."
+
+# Authenticate with Google Cloud
+echo $GOOGLE_SERVICE_ACCOUNT | base64 --decode >.connect2console/service-account.json
+GOOGLE_ACCESS_TOKEN=$(gcloud auth print-access-token --credential-file-override=".connect2console/service-account.json" --scopes=https://www.googleapis.com/auth/androidpublisher)
+
+# Clean up temporary files
+rm -rf .connect2console 2>/dev/null
+
+# Test Google Cloud authentication
+if [ $? -ne 0 ]; then
+  echo "\033[31m[💥] \`gcloud\` is not configured correctly - aborting. \033[0m"
+  exit 1
+fi
+
+# Get the latest production edit ID
+EDIT_ID=$(
+  curl -s -X POST "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/$ANDROID_BUNDLE_ID/edits" \
+    -H "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" -H "Content-Type: application/json" | jq -r '.id'
+)
+
+# Check if the version should be automatically submitted
+SHOULD_SUBMIT=$([[ " $* " =~ " --submit " ]] && echo true || echo false)
+RELEASE_STATUS=$(if [ "$SHOULD_SUBMIT" = true ]; then echo "completed"; else echo "draft"; fi)
+
+# Create a temporary JSON file with the changelog
+RELEASE_NOTES=$(printf "%s" "$OUTPUT")
+TMP_JSON=$(mktemp)
+cat >"$TMP_JSON" <<EOF
+{
+  "track": "production",
+  "releases": [{
+    "name": "$BUILD_NAME",
+    "versionCodes": ["$BUILD_NUMBER"],
+    "status": "$RELEASE_STATUS",
+    "releaseNotes": $RELEASE_NOTES
+  }]
+}
+EOF
+
+# Update the release notes
+curl --silent --request PUT \
+  --output /dev/null --show-error --fail \
+  --header "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" \
+  --header "Content-Type: application/json" \
+  -d @"$TMP_JSON" \
+  "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${ANDROID_BUNDLE_ID}/edits/${EDIT_ID}/tracks/production"
+
+# Validate the edit
+curl --silent --request POST \
+  --output /dev/null --show-error --fail \
+  --header "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" \
+  --header "Content-Type: application/json" \
+  "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${ANDROID_BUNDLE_ID}/edits/${EDIT_ID}:validate"
+
+# Commit the edit
+curl --silent --request POST \
+  --output /dev/null --show-error --fail \
+  --header "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" \
+  --header "Content-Type: application/json" \
+  "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${ANDROID_BUNDLE_ID}/edits/${EDIT_ID}:commit"
+
+# Clean up temporary JSON
+rm "$TMP_JSON"
+
+echo "\n- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+echo "\n \033[32m[✅] Android draft updated \033[0m \n"
+echo "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\n"

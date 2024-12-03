@@ -1,0 +1,90 @@
+#!/bin/zsh
+
+# A simple script that utilizes `arb_translate`, `arb_utils`, and `git` diffs to check which arb keys
+# were changed and/or removed from the template file, and then updates the other arb files accordingly.
+#
+# It uses:
+# - `yq` to get the path from `l10n.yaml`.
+# - `jq` to modify arb files.
+# - `arb_utils` to sort the template file (e.g. `app_en.arb`).
+# - `arb_translate` to generate translations.
+# - `git` to check for diffs.
+#
+# Prerequisites:
+# - `ARB_TRANSLATE_API_KEY` added to your environment variables.
+# - `l10n.yaml` file in the root directory of your Flutter project.
+#
+# MIT License | http://github.com/n-bernat/flutter-tools
+
+# Check if `pubspec.yaml` file exists
+if [ ! -f "pubspec.yaml" ]; then
+  echo "[❌] \`pubspec.yaml\` file not found. Please run this script in the root directory of your Flutter project."
+  exit 1
+fi
+
+# Check if `l10n.yaml` file exists
+if [ ! -f "l10n.yaml" ]; then
+  echo "[❌] \`l10n.yaml\` file not found. Please ensure that it exists in the root directory of your Flutter project."
+  exit 1
+fi
+
+# Check if `git` is installed
+if ! command -v git &>/dev/null; then
+  echo "[❌] \`git\` is not installed. Please install it by running: \`brew install git\`"
+  exit 1
+fi
+
+# Check if `yq` is installed
+if ! command -v yq &>/dev/null; then
+  echo "[❌] \`yq\` is not installed. Please install it by running: \`brew install yq\`"
+  exit 1
+fi
+
+# Check if `jq` is installed
+if ! command -v jq &>/dev/null; then
+  echo "[❌] \`jq\` is not installed. Please install it by running: \`brew install jq\`"
+  exit 1
+fi
+
+# Check if `arb_utils` is activated
+if ! command -v arb_utils &>/dev/null; then
+  echo "[❗] \`arb_utils\` is not activated. Activating it..."
+  dart pub global activate arb_utils
+fi
+
+# Check if `arb_translate` is activated
+if ! command -v arb_translate &>/dev/null; then
+  echo "[❗] \`arb_translate\` is not activated. Activating it..."
+  dart pub global activate arb_translate
+fi
+
+# Get template path from `l10n.yaml`
+ARB_DIR=$(yq -r '.arb-dir' l10n.yaml)
+TEMPLATE_PATH="$ARB_DIR/$(yq -r '.template-arb-file' l10n.yaml)"
+
+# Check the diff & remove modified keys from other .arb files
+DIFFS=$(git diff --unified=0 --exit-code $TEMPLATE_PATH | sed -n 's/^-  "\([^"]*\)":.*/\1/p')
+FILES=$(ls $ARB_DIR | grep -v $(basename $TEMPLATE_PATH))
+
+if [ ! -z "$DIFFS" ]; then
+  echo $FILES | while read FILE; do
+    echo $DIFFS | while read DIFF; do
+      JQ_CMD="del(.$DIFF)"
+      # FIXME: It works, but update it later so I don't kill my SSD in a week
+      jq -r $JQ_CMD $ARB_DIR/$FILE >$ARB_DIR/$FILE.tmp && mv $ARB_DIR/$FILE.tmp $ARB_DIR/$FILE
+    done
+  done
+fi
+
+# Sort the template file
+arb_utils sort $TEMPLATE_PATH
+
+# Generate translations
+arb_translate
+
+# Generate dart files
+if command -v fvm &>/dev/null; then
+  fvm flutter gen-l10n
+else
+  flutter gen-l10n
+fi

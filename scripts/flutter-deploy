@@ -1,0 +1,469 @@
+#!/bin/zsh
+
+# A script to build and deploy Flutter apps to the App Store (iOS) and
+# Google Play Store (Android) from your local machine.
+#
+# It exists because I don't want to bother with setting up
+# Fastlane/GitHub Actions/other cool tool™ for every small project and managing
+# thousands of secrets in a bunch of different places.
+#
+# Handles versioning, removing dev dependencies, building, and deploying the app to the stores.
+# Also has some basic error handling and sanity checks.
+#
+# You can skip iOS or Android build by providing `--skip-ios` or `--skip-android` flags.
+#
+# There are some assumptions made by this script, you probably need to adjust it to your needs.
+# Assumptions:
+# - You are on a macOS.
+# - You can update 4 constants at the beginning of the script (or export them from .zshrc).
+# - By default you want to deploy to both App Store and Google Play Store if your app supports
+#     those platforms (i.e. contains platform directories).
+# - You want to use `pubspec.yaml` for versioning.
+# - You want to regenerate localization files if you have `l10n.yaml` file.
+# - You want your app to be obfuscated.
+# - You want to have `APP_PRODUCTION`, `BUILD_NAME`, `BUILD_NUMBER`, and constants from `.env` available in your app.
+# - You are not afraid of colorful output and emojis in the terminal.
+#
+# MIT License | http://github.com/n-bernat/flutter-tools
+
+# ###################
+# #    Constants    #
+# ###################
+
+# Apple-related credentials
+# APPLE_ISSUER_ID="XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
+# APPLE_KEY_ID="XXXXXXXXXXXX"
+# APPLE_KEY_P8="~ base64 encoded api key ~"
+
+# Google-related credentials
+# GOOGLE_SERVICE_ACCOUNT="~ base64 encoded service account ~"
+
+# ###################
+# #     Prepare     #
+# ###################
+
+START_TIME="$(date -u +%s)"
+
+IPA_PATH=".flutter-deploy/app-store.ipa"
+AAB_PATH=".flutter-deploy/google-play.aab"
+
+# Later on we add build name and number to dart defines, so you don't have to depend on `package_info_plus`
+DART_DEFINES="--dart-define=APP_PRODUCTION=true"
+
+echo "\n############################"
+echo "#                          #"
+echo "#      flutter-deploy      #"
+echo "#                          #"
+echo "############################\n"
+
+echo "[ℹ️ ] You can skip iOS or Android build by providing \`--skip-ios\` or \`--skip-android\` flags respectively."
+
+echo "[ℹ️ ] Validating your configuration, it can take a few seconds..."
+
+# - - - General validation - - -
+
+# Check if `pubspec.yaml` file exists
+if [ ! -f "pubspec.yaml" ]; then
+  echo "\033[31m[💥] \`pubspec.yaml\` file not found. Please run this script in the root directory of your Flutter project. \033[0m"
+  exit 1
+fi
+
+# Check if `yq` is installed
+if ! command -v yq &>/dev/null; then
+  echo "\033[31m[💥] \`yq\` is not installed. Please install it by running: \`brew install yq\` \033[0m"
+  exit 1
+fi
+
+# Clean up and create a temporary directory
+rm -rf .flutter-deploy 2>/dev/null
+mkdir .flutter-deploy
+
+# - - - Apple-specific configuration - - -
+
+# Checks whether:
+# - `ios` directory exists
+# - APPLE_ID and APPLE_APP_PASSWORD are set
+# `--skip-ios` is not provided
+ENABLE_IOS_BUILD=$([[ -d "ios" && -n "${APPLE_ID}" && -n "${APPLE_APP_PASSWORD}" && ! " $* " == *" --skip-ios "* ]] && echo true || echo false)
+
+if [ $ENABLE_IOS_BUILD = true ]; then
+  echo "[ℹ️ ] iOS build enabled - running additional checks..."
+
+  # Check if `xcrun` is installed
+  if ! command -v xcrun &>/dev/null; then
+    echo "\033[31m[💥] \`xcrun\` is not installed. Please install it by running: \`xcode-select --install\` \033[0m"
+    rm -rf .flutter-deploy 2>/dev/null
+    exit 1
+  fi
+
+  # List apps to validate `xcrun` credentials
+  mkdir private_keys 2>/dev/null
+  echo $APPLE_KEY_P8 | base64 --decode >"private_keys/AuthKey_$APPLE_KEY_ID.p8"
+  XCRUN_TEST=$(xcrun altool --list-apps --apiIssuer $APPLE_ISSUER_ID --apiKey $APPLE_KEY_ID 2>/dev/null)
+  if [ $? -ne 0 ]; then
+    echo "\033[31m[💥] \`xcrun\` is not configured correctly or there is something wrong with your credentials - aborting. \033[0m"
+    rm -rf .flutter-deploy 2>/dev/null
+    rm -rf private_keys 2>/dev/null
+    exit 1
+  fi
+
+  rm -rf private_keys 2>/dev/null
+else
+  echo "\033[33m[❗] Skipping iOS build. \033[0m"
+fi
+
+# - - - Google-specific configuration - - -
+
+# Checks whether:
+# - `android` directory exists
+# - GOOGLE_SERVICE_ACCOUNT is set
+# `--skip-android` is not provided
+ENABLE_ANDROID_BUILD=$([[ -d "android" && -n "${GOOGLE_SERVICE_ACCOUNT}" && ! " $* " == *" --skip-android "* ]] && echo true || echo false)
+
+if [ $ENABLE_ANDROID_BUILD = true ]; then
+  echo "[ℹ️ ] Android build enabled - running additional checks..."
+
+  # Check if `bundletool` is installed
+  if ! command -v bundletool &>/dev/null; then
+    echo "\033[31m[💥] \`bundletool\` is not installed. Please install it by running: \`brew install bundletool\` \033[0m"
+    rm -rf .flutter-deploy 2>/dev/null
+    exit 1
+  fi
+
+  # Check if `gcloud` is installed
+  if ! command -v gcloud &>/dev/null; then
+    echo "\033[31m[💥] \`gcloud\` is not installed. Please install it by running: \`brew install --cask google-cloud-sdk\` \033[0m"
+    rm -rf .flutter-deploy 2>/dev/null
+    exit 1
+  fi
+
+  # Authenticate with Google Cloud
+  echo $GOOGLE_SERVICE_ACCOUNT | base64 --decode >.flutter-deploy/service-account.json
+  GOOGLE_ACCESS_TOKEN=$(gcloud auth print-access-token --credential-file-override=".flutter-deploy/service-account.json" --scopes=https://www.googleapis.com/auth/androidpublisher)
+
+  # Test Google Cloud authentication
+  if [ $? -ne 0 ]; then
+    echo "\033[31m[💥] \`gcloud\` is not configured correctly - aborting. \033[0m"
+    rm -rf .flutter-deploy 2>/dev/null
+    exit 1
+  fi
+
+  rm .flutter-deploy/service-account.json
+else
+  echo "\033[33m[❗] Skipping Android build. \033[0m"
+fi
+
+# - - - Prepare build name and version - - -
+
+# Get BUILD_NAME and BUILD_NUMBER from `pubspec.yaml` file
+PUBSPEC_VERSION=$(yq -r '.version' pubspec.yaml)
+if [ "$PUBSPEC_VERSION" = "null" ]; then
+  echo "\033[31m[💥] \`version\` field not found in \`pubspec.yaml\` file. Please add a correct version field (e.g. \`version: 1.0.0+1\`) to your \`pubspec.yaml\` file. \033[0m"
+  rm -rf .flutter-deploy 2>/dev/null
+  exit 1
+fi
+
+# Split PUBSPEC_VERSION at `+` sign to `BUILD_NAME` and `BUILD_NUMBER`
+IFS='+' read -r BUILD_NAME BUILD_NUMBER <<<"$PUBSPEC_VERSION"
+
+# Check if BUILD_NUMBER is a number
+if ! [[ $BUILD_NUMBER =~ ^[0-9]+$ ]]; then
+  echo "\033[31m[💥] Build name is not a number (value: \"$BUILD_NUMBER\"). Please make sure your \`version\` field in \`pubspec.yaml\` is correct (e.g. \`version: 1.0.0+1\`), and try again. \033[0m"
+  rm -rf .flutter-deploy 2>/dev/null
+  exit 1
+fi
+
+# Check if BUILD_NAME matches the version regex
+if ! [[ $BUILD_NAME =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+  echo "\033[31m[💥] Build name is not a valid version (value: \"$BUILD_NAME\"). Please make sure your \`version\` field in \`pubspec.yaml\` is correct (e.g. \`version: 1.0.0+1\`), and try again. \033[0m"
+  rm -rf .flutter-deploy 2>/dev/null
+  exit 1
+fi
+
+# Print the current and the next BUILD_NUMBER
+echo "\033[33m[❗] This build will update the build number from $BUILD_NUMBER to $((BUILD_NUMBER + 1)). Abort if you want to change it. \033[0m"
+
+# Increment the BUILD_NUMBER & the last part of the BUILD_NAME
+BUILD_NUMBER=$((BUILD_NUMBER + 1))
+SUGGESTED_BUILD_NAME=$(echo $BUILD_NAME | awk -F. -v OFS=. '{$NF = $NF + 1;} 1')
+
+# Ask the user about the new BUILD_NAME
+printf "Enter the new build name (default: $SUGGESTED_BUILD_NAME): "
+read NEW_BUILD_NAME
+
+# Update the BUILD_NAME if the user provided a new one, otherwise use the suggested one
+if [ -n "$NEW_BUILD_NAME" ]; then
+  # Check if NEW_BUILD_NAME matches the version regex
+  if ! [[ $NEW_BUILD_NAME =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+    echo "\033[31m[💥] Provided build name is not valid (value: \"$NEW_BUILD_NAME\"). Please make sure your build name is correct (e.g. \`1.2.3\`), and try again. \033[0m"
+    rm -rf .flutter-deploy 2>/dev/null
+    exit 1
+  fi
+
+  BUILD_NAME=$NEW_BUILD_NAME
+else
+  BUILD_NAME=$SUGGESTED_BUILD_NAME
+fi
+
+# Add the new BUILD_NAME and BUILD_NUMBER to dart defines
+DART_DEFINES="$DART_DEFINES --dart-define=BUILD_NAME=$BUILD_NAME --dart-define=BUILD_NUMBER=$BUILD_NUMBER"
+
+# Update the build version and build number in `pubspec.yaml`
+sed -i '' "1,/^version: .*/s/^version: .*/version: $BUILD_NAME+$BUILD_NUMBER/" pubspec.yaml
+
+# Inject values from .env file into DART_DEFINES
+echo "[ℹ️ ] Adding the following \`--dart-define\` constants:"
+echo "  -> APP_PRODUCTION=true"
+echo "  -> BUILD_NAME=$BUILD_NAME"
+echo "  -> BUILD_NUMBER=$BUILD_NUMBER"
+
+if [ -f ".env" ]; then
+  while IFS= read -r line; do
+    echo "  -> $line"
+    DART_DEFINES="$DART_DEFINES --dart-define=$line"
+  done <.env
+fi
+
+# ###################
+# #      Build      #
+# ###################
+
+# Check the current Flutter version
+if command -v fvm &>/dev/null; then
+  fvm flutter --version
+else
+  flutter --version
+fi
+
+# Generate localization files if `l10n.yaml` exists
+if [ -f "l10n.yaml" ]; then
+  if command -v fvm &>/dev/null; then
+    fvm flutter gen-l10n
+  else
+    flutter gen-l10n
+  fi
+fi
+
+# Remove `dev_dependencies` from pubspec.yaml
+# See: https://github.com/flutter/flutter/issues/79261
+cp pubspec.yaml pubspec.yaml.copy
+yq -i 'del(."dev_dependencies")' pubspec.yaml
+
+# Remove stale files
+if [ $ENABLE_IOS_BUILD = true ]; then
+  rm ios/Podfile.lock
+fi
+
+# Update dependencies and create a temporary directory
+if command -v fvm &>/dev/null; then
+  fvm flutter pub get
+else
+  flutter pub get
+fi
+
+if [ $ENABLE_IOS_BUILD = true ]; then
+  cd ios
+  pod install --repo-update
+  cd ..
+fi
+
+# Build iOS only if iOS builds are enabled, otherwise skip it
+if [ $ENABLE_IOS_BUILD = true ]; then
+  # Build iOS
+  if command -v fvm &>/dev/null; then
+    fvm flutter build ipa --build-name=$BUILD_NAME --build-number=$BUILD_NUMBER $DART_DEFINES --obfuscate --split-debug-info=build/app/outputs/symbols-ios
+  else
+    flutter build ipa --build-name=$BUILD_NAME --build-number=$BUILD_NUMBER $DART_DEFINES --obfuscate --split-debug-info=build/app/outputs/symbols-ios
+  fi
+
+  # Show error if failed
+  if [ $? -ne 0 ]; then
+    echo "\n- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+    echo "\n \033[31m[💥] iOS build failed at $(date -u +"%Y-%m-%d %H:%M:%S"). Aborting and cleaning up... \033[0m \n"
+    echo "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\n"
+
+    # Restore pubspec.yaml & remove temporary directory
+    rm pubspec.yaml
+    mv pubspec.yaml.copy pubspec.yaml
+    rm -rf .flutter-deploy 2>/dev/null
+    exit 1
+  # Proceed if successful
+  else
+    # Move IPA to a release directory
+    mv build/ios/ipa/*.ipa $IPA_PATH
+
+    # Show success message
+    echo "\n- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+    echo "\n \033[32m[✅] iOS build completed at $(date -u +"%Y-%m-%d %H:%M:%S") \033[0m \n"
+    echo "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\n"
+  fi
+fi
+
+# Build Android only if `android` directory exists, otherwise skip it
+if [ $ENABLE_ANDROID_BUILD = true ]; then
+  # Build Android
+  if command -v fvm &>/dev/null; then
+    fvm flutter build appbundle --build-name=$BUILD_NAME --build-number=$BUILD_NUMBER $DART_DEFINES --obfuscate --split-debug-info=build/app/outputs/symbols-android
+  else
+    flutter build appbundle --build-name=$BUILD_NAME --build-number=$BUILD_NUMBER $DART_DEFINES --obfuscate --split-debug-info=build/app/outputs/symbols-android
+  fi
+
+  # Show error if failed
+  if [ $? -ne 0 ]; then
+    echo "\n- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+    echo "\n \033[31m[💥] Android build failed at $(date -u +"%Y-%m-%d %H:%M:%S"). Aborting and cleaning up... \033[0m \n"
+    echo "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\n"
+
+    # Restore pubspec.yaml & remove temporary directory
+    rm pubspec.yaml
+    mv pubspec.yaml.copy pubspec.yaml
+    rm -rf .flutter-deploy 2>/dev/null
+    exit 1
+  # Proceed if successful
+  else
+    mv build/app/outputs/bundle/release/*.aab $AAB_PATH
+
+    echo "\n- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+    echo "\n \033[32m[✅] Android build completed at $(date -u +"%Y-%m-%d %H:%M:%S") \033[0m \n"
+    echo "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\n"
+  fi
+fi
+
+# Restore pubspec.yaml & other files
+rm pubspec.yaml
+mv pubspec.yaml.copy pubspec.yaml
+if command -v fvm &>/dev/null; then
+  fvm flutter pub get
+else
+  flutter pub get
+fi
+
+if [ $ENABLE_IOS_BUILD = true ]; then
+  cd ios
+  pod install --repo-update
+  cd ..
+fi
+
+# ###################
+# #     Deploy      #
+# ###################
+
+# Upload iOS if IPA exists
+if [ -f $IPA_PATH ]; then
+  echo "\033[33m[🚀] Uploading iOS build to App Store... \033[0m"
+
+  mkdir private_keys 2>/dev/null
+  echo $APPLE_KEY_P8 | base64 --decode >"private_keys/AuthKey_$APPLE_KEY_ID.p8"
+
+  xcrun altool --upload-app --type ios --file $IPA_PATH --apiIssuer $APPLE_ISSUER_ID --apiKey $APPLE_KEY_ID
+
+  # Show error if failed
+  if [ $? -ne 0 ]; then
+    echo "\n- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+    echo "\n \033[31m[💥] iOS deployment failed at $(date -u +"%Y-%m-%d %H:%M:%S"). Aborting and cleaning up... \033[0m \n"
+    echo "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\n"
+
+    rm -rf .flutter-deploy 2>/dev/null
+    rm -rf private_keys 2>/dev/null
+    exit 1
+  else
+    rm -rf private_keys 2>/dev/null
+
+    echo "\n- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+    echo "\n \033[32m[✅] iOS deployment completed at $(date -u +"%Y-%m-%d %H:%M:%S") \033[0m \n"
+    echo "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\n"
+  fi
+fi
+
+# Upload Android if AAB exists
+if [ -f $AAB_PATH ]; then
+  echo "\033[33m[🚀] Uploading Android build to Google Play... \033[0m"
+  BUNDLE_ID=$(bundletool dump manifest --bundle=".flutter-deploy/google-play.aab" | grep -o "package=\"[^\"]*\"" | cut -d'"' -f2)
+  EDIT_ID=$(date +%s)
+
+  echo "[ℹ️ ] Creating a new draft..."
+  curl --silent --request POST \
+    --header "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" \
+    --header "Content-Type: application/json" \
+    --data '{}' \
+    "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${BUNDLE_ID}/edits" \
+    >".flutter-deploy/edit.json"
+
+  EDIT_ID=$(cat ".flutter-deploy/edit.json" | grep -o '"id": "[^"]*"' | cut -d'"' -f4)
+
+  if [ -z "$EDIT_ID" ]; then
+    echo "\n- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+    echo "\n \033[31m[💥] Android deployment failed (while creating a new edit) at $(date -u +"%Y-%m-%d %H:%M:%S"). Aborting and cleaning up... \033[0m \n"
+    echo "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\n"
+
+    rm -rf .flutter-deploy 2>/dev/null
+    exit 1
+  fi
+
+  echo "[ℹ️ ] Uploading the AAB file..."
+  curl --silent --request POST \
+    --output /dev/null --show-error --fail \
+    --header "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" \
+    --header "Content-Type: application/octet-stream" \
+    --data-binary "@${AAB_PATH}" \
+    "https://androidpublisher.googleapis.com/upload/androidpublisher/v3/applications/${BUNDLE_ID}/edits/${EDIT_ID}/bundles?uploadType=media"
+
+  echo "[ℹ️ ] Assigning the uploaded AAB to the production track..."
+  curl --silent --request PUT \
+    --output /dev/null --show-error --fail \
+    --header "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" \
+    --header "Content-Type: application/json" \
+    --data "{
+        \"releases\": [{
+            \"versionCodes\": [${BUILD_NUMBER}],
+            \"status\": \"draft\"
+        }]
+    }" \
+    "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${BUNDLE_ID}/edits/${EDIT_ID}/tracks/production"
+
+  echo "[ℹ️ ] Validating the draft..."
+  curl --silent --request POST \
+    --output /dev/null --show-error --fail \
+    --header "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" \
+    --header "Content-Type: application/json" \
+    "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${BUNDLE_ID}/edits/${EDIT_ID}:validate"
+
+  echo "[ℹ️ ] Commiting changes..."
+  curl --silent --request POST \
+    --header "Authorization: Bearer $GOOGLE_ACCESS_TOKEN" \
+    --header "Content-Type: application/json" \
+    "https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${BUNDLE_ID}/edits/${EDIT_ID}:commit" \
+    >".flutter-deploy/commit.json"
+
+  # Check if commit was successful
+  if ! grep -q "\"id\":" ".flutter-deploy/commit.json"; then
+    echo "\n- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+    echo "\n \033[31m[💥] Android deployment failed (while commiting changes) at $(date -u +"%Y-%m-%d %H:%M:%S"). Aborting and cleaning up... \033[0m \n"
+    echo "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\n"
+
+    rm -rf .flutter-deploy 2>/dev/null
+    exit 1
+  fi
+
+  echo "\n- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+  echo "\n \033[32m[✅] Android deployment completed at $(date -u +"%Y-%m-%d %H:%M:%S") \033[0m \n"
+  echo "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\n"
+fi
+
+# Clean up temporary directory
+rm -rf .flutter-deploy 2>/dev/null
+
+# Display summary and elapsed time
+END_TIME="$(date -u +%s)"
+ELAPSED_S="$(($END_TIME - $START_TIME))"
+ELAPSED_M="$(echo "scale=2; $ELAPSED_S / 60" | bc)"
+
+echo "\n- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -"
+echo "\n \033[32m[✅] All done! Finished at $(date -u +"%Y-%m-%d %H:%M:%S") (took $ELAPSED_M minutes)\n"
+echo "      Remember to go to App Store Connect and Google Play Console and submit a new production release!\n"
+echo "      #########  ###  ##  ##  #  #  #  #"
+echo "      #"
+echo "      #   Version $BUILD_NAME (build $BUILD_NUMBER)"
+echo "      #"
+echo "      #########  ###  ##  ##  #  #  #  # \033[0m \n"
+echo "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\n"

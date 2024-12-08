@@ -48,7 +48,7 @@ IPA_PATH=".flutter-deploy/app-store.ipa"
 AAB_PATH=".flutter-deploy/google-play.aab"
 
 # Later on we add build name and number to dart defines, so you don't have to depend on `package_info_plus`
-DART_DEFINES="--dart-define=APP_PRODUCTION=true"
+DART_DEFINES="--dart-define=APP_PRODUCTION=true --dart-define=BUILD_TIMESTAMP=\"$(date -u +"%Y-%m-%dT%H:%M:%SZ")\""
 
 echo "\n############################"
 echo "#                          #"
@@ -107,6 +107,18 @@ if [ $ENABLE_IOS_BUILD = true ]; then
     exit 1
   fi
 
+  # Extract Bundle ID from the iOS project
+  APPLE_BUNDLE_ID=$(plutil -convert json -o - ios/Runner.xcodeproj/project.pbxproj | jq -r '.. | select(.buildSettings? != null) | select(.buildSettings.IPHONEOS_DEPLOYMENT_TARGET != null and .buildSettings.INFOPLIST_FILE != null) | .buildSettings.PRODUCT_BUNDLE_IDENTIFIER? | select(. != null) | select(length > 0)' | head -n 1)
+  if [ $? -ne 0 ]; then
+    echo "\033[31m[💥] Unable to extract the bundle ID from the iOS project. \033[0m"
+    exit 1
+  fi
+
+  if [ -z "$APPLE_BUNDLE_ID" ]; then
+    echo "\033[31m[💥] Bundle ID not found in the iOS project. \033[0m"
+    exit 1
+  fi
+
   rm -rf private_keys 2>/dev/null
 else
   echo "\033[33m[❗] Skipping iOS build. \033[0m"
@@ -134,6 +146,18 @@ if [ $ENABLE_ANDROID_BUILD = true ]; then
   if ! command -v gcloud &>/dev/null; then
     echo "\033[31m[💥] \`gcloud\` is not installed. Please install it by running: \`brew install --cask google-cloud-sdk\` \033[0m"
     rm -rf .flutter-deploy 2>/dev/null
+    exit 1
+  fi
+
+  # Extract Bundle ID from the Android project
+  ANDROID_BUNDLE_ID=$(grep "applicationId" android/app/build.gradle | sed 's/.*applicationId "\(.*\)".*/\1/')
+  if [ $? -ne 0 ]; then
+    echo "\033[31m[💥] Unable to extract the bundle ID from the Android project. \033[0m"
+    exit 1
+  fi
+
+  if [ -z "$ANDROID_BUNDLE_ID" ]; then
+    echo "\033[31m[💥] Bundle ID not found in the Android project. \033[0m"
     exit 1
   fi
 
@@ -270,10 +294,11 @@ fi
 # Build iOS only if iOS builds are enabled, otherwise skip it
 if [ $ENABLE_IOS_BUILD = true ]; then
   # Build iOS
+  BUILD_PARAMETERS="--build-name=$BUILD_NAME --build-number=$BUILD_NUMBER --dart-define=BUNDLE_ID=$APPLE_BUNDLE_ID $DART_DEFINES --obfuscate --split-debug-info=build/app/outputs/symbols-ios"
   if command -v fvm &>/dev/null; then
-    fvm flutter build ipa --build-name=$BUILD_NAME --build-number=$BUILD_NUMBER $DART_DEFINES --obfuscate --split-debug-info=build/app/outputs/symbols-ios
+    eval "fvm flutter build ipa $BUILD_PARAMETERS"
   else
-    flutter build ipa --build-name=$BUILD_NAME --build-number=$BUILD_NUMBER $DART_DEFINES --obfuscate --split-debug-info=build/app/outputs/symbols-ios
+    eval "flutter build ipa $BUILD_PARAMETERS"
   fi
 
   # Show error if failed
@@ -302,10 +327,11 @@ fi
 # Build Android only if `android` directory exists, otherwise skip it
 if [ $ENABLE_ANDROID_BUILD = true ]; then
   # Build Android
+  BUILD_PARAMETERS="--build-name=$BUILD_NAME --build-number=$BUILD_NUMBER --dart-define=BUNDLE_ID=$ANDROID_BUNDLE_ID $DART_DEFINES --obfuscate --split-debug-info=build/app/outputs/symbols-android"
   if command -v fvm &>/dev/null; then
-    fvm flutter build appbundle --build-name=$BUILD_NAME --build-number=$BUILD_NUMBER $DART_DEFINES --obfuscate --split-debug-info=build/app/outputs/symbols-android
+    eval "fvm flutter build appbundle $BUILD_PARAMETERS"
   else
-    flutter build appbundle --build-name=$BUILD_NAME --build-number=$BUILD_NUMBER $DART_DEFINES --obfuscate --split-debug-info=build/app/outputs/symbols-android
+    eval "flutter build appbundle $BUILD_PARAMETERS"
   fi
 
   # Show error if failed

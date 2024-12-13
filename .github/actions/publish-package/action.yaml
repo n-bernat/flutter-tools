@@ -1,0 +1,25 @@
+name: Publish a package on pub.dev
+description: Publish a new package on pub.dev and create a tag.
+
+runs:
+  using: composite
+
+  steps:
+    - name: Setup Flutter
+      uses: subosito/flutter-action@v2
+
+    # See more:
+    # https://github.com/dart-lang/setup-dart/issues/68#issuecomment-2251116730
+    - name: Get Token
+      uses: actions/github-script@v6
+      with:
+        script: |
+          let PUB_TOKEN = await core.getIDToken('https://pub.dev')
+          core.exportVariable('PUB_TOKEN', PUB_TOKEN)
+
+    - name: Authenticate
+      shell: ${{ inputs.shell }}
+      run: flutter pub pub token add https://pub.dev --env-var PUB_TOKEN
+
+    - run: ${{ github.action_path }}/publish-package.sh
+      shell: bash

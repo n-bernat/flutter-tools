@@ -18,31 +18,31 @@
 
 # Check if `pubspec.yaml` file exists
 if [ ! -f "pubspec.yaml" ]; then
-  echo "[❌] \`pubspec.yaml\` file not found. Please run this script in the root directory of your Flutter project."
+  echo "\033[31m[💥] \`pubspec.yaml\` file not found. Please run this script in the root directory of your Flutter project. \033[0m"
   exit 1
 fi
 
 # Check if `l10n.yaml` file exists
 if [ ! -f "l10n.yaml" ]; then
-  echo "[❌] \`l10n.yaml\` file not found. Please ensure that it exists in the root directory of your Flutter project."
+  echo "\033[31m[💥] \`l10n.yaml\` file not found. Please ensure that it exists in the root directory of your Flutter project. \033[0m"
   exit 1
 fi
 
 # Check if `git` is installed
 if ! command -v git &>/dev/null; then
-  echo "[❌] \`git\` is not installed. Please install it by running: \`brew install git\`"
+  echo "\033[31m[💥] \`git\` is not installed. Please install it by running: \`brew install git\` \033[0m"
   exit 1
 fi
 
 # Check if `yq` is installed
 if ! command -v yq &>/dev/null; then
-  echo "[❌] \`yq\` is not installed. Please install it by running: \`brew install yq\`"
+  echo "\033[31m[💥] \`yq\` is not installed. Please install it by running: \`brew install yq\` \033[0m"
   exit 1
 fi
 
 # Check if `jq` is installed
 if ! command -v jq &>/dev/null; then
-  echo "[❌] \`jq\` is not installed. Please install it by running: \`brew install jq\`"
+  echo "\033[31m[💥] \`jq\` is not installed. Please install it by running: \`brew install jq\` \033[0m"
   exit 1
 fi
 

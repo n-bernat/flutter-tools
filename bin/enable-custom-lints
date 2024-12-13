@@ -1,0 +1,36 @@
+#!/bin/zsh
+
+# A simple script that enables custom lints in your project.
+
+# Prerequisites:
+# - `analysis_options.yaml` file in the root directory of your Flutter project.
+#
+# MIT License | http://github.com/n-bernat/flutter-tools
+
+# Check if `pubspec.yaml` file exists
+if [ ! -f "pubspec.yaml" ]; then
+  echo "\033[31m[💥] \`pubspec.yaml\` file not found. Please run this script in the root directory of your Flutter project. \033[0m"
+  exit 1
+fi
+
+# Check if `analysis_options.yaml` file exists
+if [ ! -f "analysis_options.yaml" ]; then
+  echo "\033[31m[💥] \`analysis_options.yaml\` file not found. Please ensure that it exists in the root directory of your Flutter project. \033[0m"
+  exit 1
+fi
+
+# Check if `yq` is installed
+if ! command -v yq &>/dev/null; then
+  echo "\033[31m[💥] \`yq\` is not installed. Please install it before running this script. \033[0m"
+  exit 1
+fi
+
+# Check if `dart` is installed
+if ! command -v dart &>/dev/null; then
+  echo "\033[31m[💥] \`dart\` is not installed. Please install it before running this script. \033[0m"
+  exit 1
+fi
+
+# Add `custom_lint` package to your project
+dart pub add custom_lint --dev
+yq -i '.analyzer.plugins = ["custom_lint"]' analysis_options.yaml

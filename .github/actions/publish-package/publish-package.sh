@@ -21,7 +21,7 @@ if ! command -v yq &>/dev/null; then
 fi
 
 # Create an array with packages based on CHANGELOG.md files.
-PACKAGE_PATHS=$(git diff --name-only HEAD^ | grep "/CHANGELOG.md" | sed 's/\/CHANGELOG.md//g')
+PACKAGE_PATHS=$(git diff --name-only HEAD^ -- | grep "/CHANGELOG.md" | sed 's/\/CHANGELOG.md//g')
 
 # Base path of the repository.
 BASE_PATH=$(echo "$PWD")

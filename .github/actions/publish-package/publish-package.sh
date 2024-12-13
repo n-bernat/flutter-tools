@@ -67,7 +67,12 @@ while IFS= read -r PACKAGE_PATH; do
   fi
 
   # Update the version in `pubspec.yaml` file.
-  sed -i '' "1,/^version: .*/s/^version: .*/version: $CHANGELOG_VERSION/" $PACKAGE_PATH/pubspec.yaml
+  # If macos
+  if [[ "$OSTYPE" == "darwin"* ]]; then
+    sed -i '' "1,/^version: .*/s/^version: .*/version: $CHANGELOG_VERSION/" pubspec.yaml
+  else
+    sed -i "1,/^version: .*/s/^version: .*/version: $CHANGELOG_VERSION/" pubspec.yaml
+  fi
 
   # Configure `git`.
   # (https://github.com/actions/checkout/pull/1184)

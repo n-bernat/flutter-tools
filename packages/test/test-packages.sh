@@ -27,16 +27,16 @@ while IFS= read -r PACKAGE_PATH; do
     continue
   fi
 
-  # Optionally enable `custom_lint` package.
-  if [ "$CUSTOM_LINT_ENABLED" = "true" ]; then
-    LOG_MESSAGE "0" "[ℹ️] Enabling \`custom_lint\` package inside \`$PACKAGE_PATH\`..."
-    dart pub add custom_lint --dev
-    yq -i '.analyzer.plugins = ["custom_lint"]' analysis_options.yaml
-  fi
-
   # Flutter-specific tests.
   if [ -n "$(yq -e '.dependencies.flutter // ""' pubspec.yaml)" ]; then
     LOG_MESSAGE "0" "[ℹ️] Running Flutter tests inside \`$PACKAGE_PATH\`..."
+
+    # Optionally enable `custom_lint` package.
+    if [ "$CUSTOM_LINT_ENABLED" = "true" ]; then
+      echo "Enabling \`custom_lint\` package..."
+      dart pub add custom_lint --dev
+      yq -i '.analyzer.plugins = ["custom_lint"]' analysis_options.yaml
+    fi
 
     # Get Flutter dependencies.
     flutter pub get
@@ -47,19 +47,26 @@ while IFS= read -r PACKAGE_PATH; do
     # Analyze code.
     flutter analyze
 
+    # Run custom lints.
+    if [ "$CUSTOM_LINT_ENABLED" = "true" ]; then
+      flutter pub run custom_lint
+    fi
+
     # Check if `test` directory exists, then run tests.
     if [ -d "test" ]; then
       flutter test
     else
       echo "[⏭️] \`test\` directory doesn't exist - skipping."
     fi
-
-    # Run custom lints.
-    if [ "$CUSTOM_LINT_ENABLED" = "true" ]; then
-      flutter pub run custom_lint
-    fi
   else
     LOG_MESSAGE "0" "[ℹ️] Running Dart tests inside \`$PACKAGE_PATH\`..."
+
+    # Optionally enable `custom_lint` package.
+    if [ "$CUSTOM_LINT_ENABLED" = "true" ]; then
+      echo "Enabling \`custom_lint\` package..."
+      dart pub add custom_lint --dev
+      yq -i '.analyzer.plugins = ["custom_lint"]' analysis_options.yaml
+    fi
 
     # Get Dart dependencies.
     dart pub get
@@ -70,16 +77,16 @@ while IFS= read -r PACKAGE_PATH; do
     # Analyze code.
     dart analyze
 
+    # Run custom lints.
+    if [ "$CUSTOM_LINT_ENABLED" = "true" ]; then
+      dart run custom_lint
+    fi
+
     # Check if `test` directory exists, then run tests.
     if [ -d "test" ]; then
       dart test
     else
       echo "[⏭️] \`test\` directory doesn't exist - skipping."
-    fi
-
-    # Run custom lints.
-    if [ "$CUSTOM_LINT_ENABLED" = "true" ]; then
-      dart run custom_lint
     fi
   fi
 done <<<"$PACKAGE_PATHS"

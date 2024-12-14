@@ -1,6 +1,12 @@
 name: Tag packages
 description: Creates tags for packages based on changes to CHANGELOG.md files.
 
+inputs:
+  token:
+    description: "Personal Access Token (PAT) used to push tags in a way that triggers actions."
+    required: true
+    default: ""
+
 runs:
   using: composite
   steps:
@@ -9,6 +15,7 @@ runs:
       with:
         fetch-depth: 0
         fetch-tags: true
+        token: ${{ inputs.token }}
 
     - name: Tag packages
       run: ${{ github.action_path }}/tag-packages.sh

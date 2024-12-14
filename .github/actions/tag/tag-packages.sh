@@ -69,7 +69,7 @@ while IFS= read -r PACKAGE_PATH; do
   # Check if there any changes and push them.
   if ! git diff --quiet; then
     git add .
-    git commit -m "Release $TAG_NAME"
+    git commit -m "Release \`$PACKAGE_NAME\` (\`$CHANGELOG_VERSION\`)"
     git push
   fi
 

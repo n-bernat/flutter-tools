@@ -61,7 +61,7 @@ while IFS= read -r PACKAGE_PATH; do
   TAG_NAME="$PACKAGE_NAME-v$CHANGELOG_VERSION"
 
   # Skip if it was modified, but such release (git tag) already exists.
-  if [ $(git tag -l $TAG_NAME)]; then
+  if [ $(git tag -l $TAG_NAME) ]; then
     LOG_MESSAGE "0" "[⏭️ ] Skipping publishing of \`$PACKAGE_NAME\` as \`$TAG_NAME\` already exists."
     continue
   fi

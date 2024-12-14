@@ -5,8 +5,17 @@ runs:
   using: composite
 
   steps:
+    - name: Setup Dart
+      uses: dart-lang/setup-dart@main
+
     - name: Setup Flutter
-      uses: subosito/flutter-action@v2
+      uses: flutter-actions/setup-flutter@v4
+      with:
+        channel: stable
+        version: latest
+
+    - name: Setup pub.dev credentials
+      uses: flutter-actions/setup-pubdev-credentials@v1
 
     - run: ${{ github.action_path }}/publish-package.sh
       shell: bash

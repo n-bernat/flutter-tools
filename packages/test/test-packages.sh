@@ -11,7 +11,7 @@ LOG_MESSAGE() {
 }
 
 # Create an array with packages.
-PACKAGE_PATHS=$(ls -d *)
+PACKAGE_PATHS=$(ls -d */)
 
 # Base path of the repository.
 BASE_PATH=$(echo "$PWD")

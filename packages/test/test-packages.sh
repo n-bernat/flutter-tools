@@ -49,6 +49,7 @@ while IFS= read -r PACKAGE_PATH; do
 
     # Run custom lints.
     if [ "$CUSTOM_LINT_ENABLED" = "true" ]; then
+      echo "Running \`custom_lint\` package..."
       flutter pub run custom_lint
     fi
 
@@ -79,6 +80,7 @@ while IFS= read -r PACKAGE_PATH; do
 
     # Run custom lints.
     if [ "$CUSTOM_LINT_ENABLED" = "true" ]; then
+      echo "Running \`custom_lint\` package..."
       dart run custom_lint
     fi
 

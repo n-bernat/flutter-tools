@@ -5,7 +5,7 @@ inputs:
   path:
     description: 'Template path for packages to publish (e.g. "packages/{NAME}").'
     required: true
-    default: ""
+    default: "{NAME}"
 
 runs:
   using: composite

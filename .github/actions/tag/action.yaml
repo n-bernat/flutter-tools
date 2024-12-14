@@ -3,7 +3,7 @@ description: Creates tags for packages based on changes to CHANGELOG.md files.
 
 inputs:
   token:
-    description: "Personal Access Token (PAT) used to push tags in a way that triggers actions."
+    description: "Access Token (usually PAT) used to push tags in a way that triggers actions."
     required: true
     default: ""
 

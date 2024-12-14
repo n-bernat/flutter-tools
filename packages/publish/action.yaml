@@ -4,7 +4,6 @@ description: Publishes a package from a tag to pub.dev with support for monorepo
 inputs:
   path:
     description: 'Template path for packages to publish (e.g. "packages/{NAME}").'
-    required: true
     default: "{NAME}"
 
 runs:

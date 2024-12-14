@@ -1,0 +1,34 @@
+name: Test packages
+description: Test packages in a monorepo.
+
+inputs:
+  channel:
+    description: "Channel to use for Flutter SDK."
+    default: "stable"
+  version:
+    description: "Version to use for Flutter SDK."
+    default: "latest"
+  custom-lint:
+    description: "Whether to enable custom_lint package."
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+
+    - name: Setup Dart
+      uses: dart-lang/setup-dart@main
+
+    - name: Setup Flutter
+      uses: flutter-actions/setup-flutter@v4
+      with:
+        channel: ${{ inputs.channel }}
+        version: ${{ inputs.version }}
+
+    - name: Test packages
+      run: ${{ github.action_path }}/test-packages.sh
+      shell: bash
+      env:
+        CUSTOM_LINT_ENABLED: ${{ inputs.custom-lint }}

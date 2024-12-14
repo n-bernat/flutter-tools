@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -e
+
 # Print a message ($2) in a visible way using a specified color ($1).
 # (https://stackoverflow.com/questions/5947742/how-to-change-the-output-color-of-echo-in-linux)
 LOG_MESSAGE() {
@@ -21,13 +23,13 @@ while IFS= read -r PACKAGE_PATH; do
 
   # Check if `pubspec.yaml` file exists.
   if [ ! -f "pubspec.yaml" ]; then
-    LOG_MESSAGE "0" "[⏭️ ] \`pubspec.yaml\` file not found at \`$PACKAGE_PATH\`."
+    LOG_MESSAGE "0" "[⏭️] \`pubspec.yaml\` file not found at \`$PACKAGE_PATH\`."
     continue
   fi
 
   # Check if `pubspec.yaml` is publishable (doesn't have `publish_to: none`).
   if yq -e '.publish_to // ""' pubspec.yaml | grep -q "none"; then
-    LOG_MESSAGE "0" "[⏭️ ] Skipping publishing of \`$PACKAGE_PATH\` as it has \`publish_to: none\`."
+    LOG_MESSAGE "0" "[⏭️] Skipping publishing of \`$PACKAGE_PATH\` as it has \`publish_to: none\`."
     continue
   fi
 
@@ -41,7 +43,7 @@ while IFS= read -r PACKAGE_PATH; do
   # Check whether it's a valid version number.
   # (https://dart.dev/tools/pub/pubspec#version)
   if [[ ! $CHANGELOG_VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][A-Za-z0-9.]+)*$ ]]; then
-    LOG_MESSAGE "0" "[⏭️ ] Skipping publishing of \`$PACKAGE_NAME\` as \`$CHANGELOG_VERSION\` isn't a valid version number."
+    LOG_MESSAGE "0" "[⏭️] Skipping publishing of \`$PACKAGE_NAME\` as \`$CHANGELOG_VERSION\` isn't a valid version number."
     continue
   fi
 
@@ -50,7 +52,7 @@ while IFS= read -r PACKAGE_PATH; do
 
   # Skip if it was modified, but such release (git tag) already exists.
   if [ $(git tag -l $TAG_NAME) ]; then
-    LOG_MESSAGE "0" "[⏭️ ] Skipping publishing of \`$PACKAGE_NAME\` as \`$TAG_NAME\` already exists."
+    LOG_MESSAGE "0" "[⏭️] Skipping publishing of \`$PACKAGE_NAME\` as \`$TAG_NAME\` already exists."
     continue
   fi
 

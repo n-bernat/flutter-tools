@@ -1,0 +1,15 @@
+name: Tag packages
+description: Creates tags for packages based on changes to CHANGELOG.md files.
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        fetch-tags: true
+
+    - name: Tag packages
+      run: ${{ github.action_path }}/tag-packages.sh
+      shell: bash

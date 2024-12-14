@@ -1,0 +1,35 @@
+name: Publish a package
+description: Publishes a package from a tag to pub.dev with support for monorepos.
+
+inputs:
+  path:
+    description: 'Template path for packages to publish (e.g. "packages/{NAME}").'
+    required: true
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Clone repository
+      uses: actions/checkout@v4
+
+    - name: Setup Dart
+      uses: dart-lang/setup-dart@main
+
+    - name: Setup Flutter
+      uses: flutter-actions/setup-flutter@v4
+      with:
+        channel: stable
+        version: latest
+
+    - name: Setup pub.dev credentials
+      uses: flutter-actions/setup-pubdev-credentials@v1
+
+    - name: Publish to pub.dev
+      shell: bash
+      env:
+        PACKAGE_PATH: ${{ inputs.path }}
+      run: |
+        PACKAGE_PATH=$(echo $PACKAGE_PATH | sed "s/{NAME}/$PACKAGE_NAME/g")
+        cd $PACKAGE_PATH
+        flutter pub publish --force

@@ -8,25 +8,13 @@ LOG_MESSAGE() {
   echo -e "- - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -\n"
 }
 
-# Check if `flutter` is installed.
-if ! command -v flutter &>/dev/null; then
-  LOG_MESSAGE "31" "[💥] \`flutter\` is not installed."
-  exit 1
-fi
-
-# Check if `yq` is installed.
-if ! command -v yq &>/dev/null; then
-  LOG_MESSAGE "31" "[💥] \`yq\` is not installed."
-  exit 1
-fi
-
 # Create an array with packages based on CHANGELOG.md files.
 PACKAGE_PATHS=$(git diff --name-only HEAD^ -- | grep "/CHANGELOG.md" | sed 's/\/CHANGELOG.md//g')
 
 # Base path of the repository.
 BASE_PATH=$(echo "$PWD")
 
-# Go through each updated package and publish it.
+# Go through each updated package and tag it.
 while IFS= read -r PACKAGE_PATH; do
   # Navigate to the package directory.
   cd $BASE_PATH/$PACKAGE_PATH
@@ -67,7 +55,6 @@ while IFS= read -r PACKAGE_PATH; do
   fi
 
   # Update the version in `pubspec.yaml` file.
-  # If macos
   if [[ "$OSTYPE" == "darwin"* ]]; then
     sed -i '' "1,/^version: .*/s/^version: .*/version: $CHANGELOG_VERSION/" pubspec.yaml
   else
@@ -90,14 +77,8 @@ while IFS= read -r PACKAGE_PATH; do
   git tag $TAG_NAME
   git push origin $TAG_NAME
 
-  # Checkout to tag.
-  git checkout tags/$TAG_NAME
-
-  # Publish a new release if all prechecks succeeded.
-  LOG_MESSAGE "33" "[🚀] Publishing version \`$CHANGELOG_VERSION\` of \`$PACKAGE_NAME\`..."
-
-  # Navigate to the package, and publish it.
-  flutter pub publish --force
+  # Tag a new release if all prechecks succeeded.
+  LOG_MESSAGE "32" "[✅] Created a tag \`$CHANGELOG_VERSION\` for \`$PACKAGE_NAME\`."
 done <<<"$PACKAGE_PATHS"
 
 LOG_MESSAGE "32" "[✅] Finished at $(date -u +"%Y-%m-%d %H:%M:%S")"

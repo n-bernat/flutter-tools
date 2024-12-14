@@ -21,11 +21,9 @@ while IFS= read -r PACKAGE_PATH; do
   # Navigate to the package directory.
   cd $BASE_PATH/$PACKAGE_PATH
 
-  LOG_MESSAGE "0" "[ℹ️] Running tests inside \`$BASE_PATH/$PACKAGE_PATH\`..."
-
   # Check if `pubspec.yaml` file exists.
   if [ ! -f "pubspec.yaml" ]; then
-    LOG_MESSAGE "0" "[⏭️ ] \`pubspec.yaml\` file not found at \`$PACKAGE_PATH\`."
+    LOG_MESSAGE "0" "[⏭️] \`pubspec.yaml\` file not found at \`$PACKAGE_PATH\`."
     continue
   fi
 

@@ -18,9 +18,6 @@ runs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Setup Dart
-      uses: dart-lang/setup-dart@main
-
     - name: Setup Flutter
       uses: flutter-actions/setup-flutter@v4
       with:

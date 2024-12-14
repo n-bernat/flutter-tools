@@ -35,7 +35,7 @@ while IFS= read -r PACKAGE_PATH; do
   fi
 
   # Flutter-specific tests.
-  if [ -n $(yq -e '.dependencies.flutter // ""' pubspec.yaml)]; then
+  if [ -n $(yq -e '.dependencies.flutter // ""' pubspec.yaml) ]; then
     LOG_MESSAGE "0" "[ℹ️] Running Flutter tests inside \`$PACKAGE_PATH\`..."
 
     # Format code.

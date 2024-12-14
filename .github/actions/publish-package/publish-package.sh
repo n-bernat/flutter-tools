@@ -90,6 +90,9 @@ while IFS= read -r PACKAGE_PATH; do
   git tag $TAG_NAME
   git push origin $TAG_NAME
 
+  # Checkout to tag.
+  git checkout tags/$TAG_NAME
+
   # Publish a new release if all prechecks succeeded.
   LOG_MESSAGE "33" "[🚀] Publishing version \`$CHANGELOG_VERSION\` of \`$PACKAGE_NAME\`..."
 

@@ -10,9 +10,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Clone repository
-      uses: actions/checkout@v4
-
     - name: Setup Dart
       uses: dart-lang/setup-dart@main
 
@@ -34,7 +31,13 @@ runs:
         PACKAGE_NAME=$(echo $TAG | cut -d "-" -f 1)
         PACKAGE_PATH=$(echo $PACKAGE_PATH | sed "s/{NAME}/$PACKAGE_NAME/g")
 
+        echo "PACKAGE_NAME=$PACKAGE_NAME"
+        echo "PACKAGE_PATH=$PACKAGE_PATH"
+
         if [ -f "$PACKAGE_PATH/pubspec.yaml" ]; then
           cd $PACKAGE_PATH
           flutter pub publish --force
+        else 
+          echo "No package found at $PACKAGE_PATH"
+          exit 1
         fi

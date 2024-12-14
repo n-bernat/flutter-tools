@@ -30,6 +30,11 @@ runs:
       env:
         PACKAGE_PATH: ${{ inputs.path }}
       run: |
+        TAG=$(git describe --exact-match --tags)
+        PACKAGE_NAME=$(echo $TAG | cut -d "-" -f 1)
         PACKAGE_PATH=$(echo $PACKAGE_PATH | sed "s/{NAME}/$PACKAGE_NAME/g")
-        cd $PACKAGE_PATH
-        flutter pub publish --force
+
+        if [ -f "$PACKAGE_PATH/pubspec.yaml" ]; then
+          cd $PACKAGE_PATH
+          flutter pub publish --force
+        fi
